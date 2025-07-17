@@ -84,8 +84,8 @@ export class DefaultKeyService implements KeyServiceAbstraction {
     protected kdfConfigService: KdfConfigService,
   ) {
     this.activeUserOrgKeys$ = this.stateProvider.activeUserId$.pipe(
-      switchMap((userId) => (userId != null ? this.orgKeys$(userId) : NEVER)),
       distinctUntilChanged(),
+      switchMap((userId) => (userId != null ? this.orgKeys$(userId) : NEVER)),
       shareReplay({ refCount: true, bufferSize: 1 }),
     ) as Observable<Record<OrganizationId, OrgKey>>;
   }
