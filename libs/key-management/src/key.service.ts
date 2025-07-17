@@ -4,6 +4,7 @@ import {
   Observable,
   combineLatest,
   distinctUntilChanged,
+  filter,
   firstValueFrom,
   forkJoin,
   map,
@@ -86,6 +87,7 @@ export class DefaultKeyService implements KeyServiceAbstraction {
     this.activeUserOrgKeys$ = this.stateProvider.activeUserId$.pipe(
       distinctUntilChanged(),
       switchMap((userId) => (userId != null ? this.orgKeys$(userId) : NEVER)),
+      filter((orgKeys) => orgKeys != null),
       shareReplay({ refCount: true, bufferSize: 1 }),
     ) as Observable<Record<OrganizationId, OrgKey>>;
   }
