@@ -103,7 +103,26 @@ class BitwardenVaultService {
         return vaultCache[id]
     }
     
-    fun fetchVaultAsync(authService: BitwardenAuthService, serverUrl: String = "https://api.bitwarden.com"): CompletableFuture<Boolean> {
+    private fun getApiUrl(serverUrl: String): String {
+        // Handle different server URL formats to match Bitwarden client behavior
+        val baseUrl = when {
+            serverUrl.endsWith("/") -> serverUrl.removeSuffix("/")
+            else -> serverUrl
+        }
+        
+        return when {
+            // For bitwarden.com, use api.bitwarden.com
+            baseUrl.contains("vault.bitwarden.com") -> "https://api.bitwarden.com"
+            baseUrl.contains("bitwarden.com") && !baseUrl.contains("api.") -> 
+                baseUrl.replace("vault.bitwarden.com", "api.bitwarden.com")
+                    .replace("identity.bitwarden.com", "api.bitwarden.com")
+            // For custom servers, add /api if not already there
+            baseUrl.contains("/api") -> baseUrl
+            else -> "$baseUrl/api"
+        }
+    }
+
+    fun fetchVaultAsync(authService: BitwardenAuthService, serverUrl: String = "https://vault.bitwarden.com"): CompletableFuture<Boolean> {
         return CompletableFuture.supplyAsync({
             val token = authService.getAccessToken()
             if (token == null) {
@@ -112,26 +131,38 @@ class BitwardenVaultService {
             }
             
             try {
+                // Get the correct API URL for the server
+                val apiUrl = getApiUrl(serverUrl)
+                
                 val request = Request.Builder()
-                    .url("$serverUrl/api/sync")
+                    .url("$apiUrl/sync")
                     .get()
                     .header("Authorization", "Bearer $token")
+                    .header("User-Agent", "Bitwarden JetBrains Plugin")
                     .build()
+                
+                logger.info("Fetching vault from: $apiUrl/sync")
                 
                 val response = httpClient.newCall(request).execute()
                 if (response.isSuccessful) {
                     val responseBody = response.body?.string()
                     // Parse the response and populate vault cache
+                    // TODO: Implement proper JSON parsing of sync response
+                    logger.info("Vault response received: ${responseBody?.length ?: 0} bytes")
                     // For demo purposes, adding mock data
                     addMockVaultData()
                     logger.info("Vault synced successfully")
                     true
                 } else {
-                    logger.warn("Failed to fetch vault: ${response.code} ${response.message}")
+                    val responseBody = response.body?.string()
+                    logger.warn("Failed to fetch vault: ${response.code} ${response.message} - Response: $responseBody")
                     false
                 }
             } catch (e: IOException) {
                 logger.error("Network error while fetching vault", e)
+                false
+            } catch (e: Exception) {
+                logger.error("Unexpected error while fetching vault", e)
                 false
             }
         }, AppExecutorUtil.getAppExecutorService())
