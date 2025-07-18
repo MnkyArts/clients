@@ -1,0 +1,275 @@
+name: Build JetBrains Plugin
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches-ignore:
+      - 'l10n_master'
+      - 'cf-pages'
+    paths:
+      - 'apps/jetbrains-plugin/**'
+      - 'libs/**'
+      - '*'
+      - '!*.md'
+      - '!*.txt'
+      - '.github/workflows/build-jetbrains-plugin.yml'
+  push:
+    branches:
+      - 'main'
+      - 'rc'
+      - 'hotfix-rc'
+    paths:
+      - 'apps/jetbrains-plugin/**'
+      - 'libs/**'
+      - '*'
+      - '!*.md'
+      - '!*.txt'
+      - '.github/workflows/build-jetbrains-plugin.yml'
+  workflow_call:
+    inputs: {}
+  workflow_dispatch:
+    inputs:
+      release_channel:
+        description: "Release channel (alpha, beta, stable)"
+        required: false
+        type: choice
+        options:
+          - alpha
+          - beta
+          - stable
+        default: alpha
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  setup:
+    name: Setup
+    runs-on: ubuntu-22.04
+    outputs:
+      plugin_version: ${{ steps.retrieve-version.outputs.plugin_version }}
+      release_channel: ${{ steps.release-channel.outputs.channel }}
+      build_number: ${{ steps.increment-version.outputs.build_number }}
+      node_version: ${{ steps.retrieve-node-version.outputs.node_version }}
+    defaults:
+      run:
+        working-directory: apps/jetbrains-plugin
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Get Plugin Version
+        id: retrieve-version
+        run: |
+          PLUGIN_VERSION=$(grep 'version = ' build.gradle.kts | sed 's/.*version = "\(.*\)".*/\1/')
+          echo "Setting version number to $PLUGIN_VERSION"
+          echo "plugin_version=$PLUGIN_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Increment Build Number
+        id: increment-version
+        run: |
+          BUILD_NUMBER=$(expr 1000 + $GITHUB_RUN_NUMBER)
+          echo "Setting build number to $BUILD_NUMBER"
+          echo "build_number=$BUILD_NUMBER" >> $GITHUB_OUTPUT
+
+      - name: Get Version Channel
+        id: release-channel
+        run: |
+          CHANNEL="${{ inputs.release_channel || 'alpha' }}"
+          case "${{ steps.retrieve-version.outputs.plugin_version }}" in
+            *"alpha"*)
+              CHANNEL="alpha"
+              ;;
+            *"beta"*)
+              CHANNEL="beta"
+              ;;
+            *)
+              if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+                CHANNEL="stable"
+              else
+                CHANNEL="alpha"
+              fi
+              ;;
+          esac
+          echo "channel=$CHANNEL" >> $GITHUB_OUTPUT
+          echo "Release channel: $CHANNEL"
+
+      - name: Get Node Version
+        id: retrieve-node-version
+        working-directory: ./
+        run: |
+          NODE_NVMRC=$(cat .nvmrc)
+          NODE_VERSION=${NODE_NVMRC/v/''}
+          echo "node_version=$NODE_VERSION" >> $GITHUB_OUTPUT
+
+  build:
+    name: Build Plugin
+    runs-on: ubuntu-22.04
+    needs: setup
+    env:
+      _PLUGIN_VERSION: ${{ needs.setup.outputs.plugin_version }}
+      _BUILD_NUMBER: ${{ needs.setup.outputs.build_number }}
+      _RELEASE_CHANNEL: ${{ needs.setup.outputs.release_channel }}
+      _NODE_VERSION: ${{ needs.setup.outputs.node_version }}
+    defaults:
+      run:
+        working-directory: apps/jetbrains-plugin
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Node
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: ${{ env._NODE_VERSION }}
+
+      - name: Print environment
+        run: |
+          java -version
+          ./gradlew --version
+          echo "Plugin version: ${{ env._PLUGIN_VERSION }}"
+          echo "Build number: ${{ env._BUILD_NUMBER }}"
+          echo "Release channel: ${{ env._RELEASE_CHANNEL }}"
+
+
+      - name: Cache Gradle dependencies
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Update version in build.gradle.kts
+        run: |
+          sed -i 's/version = .*/version = "${{ env._PLUGIN_VERSION }}.${{ env._BUILD_NUMBER }}"/' build.gradle.kts
+          echo "Updated version to: ${{ env._PLUGIN_VERSION }}.${{ env._BUILD_NUMBER }}"
+
+      - name: Update plugin channel if not stable
+        if: env._RELEASE_CHANNEL != 'stable'
+        run: |
+          # Update plugin.xml to include channel information
+          sed -i "s/<name>Bitwarden</name>/<name>Bitwarden (${{ env._RELEASE_CHANNEL }})</name>/" src/main/resources/META-INF/plugin.xml
+          sed -i 's/<id>com.bitwarden.jetbrains<\/id>/<id>com.bitwarden.jetbrains.${{ env._RELEASE_CHANNEL }}<\/id>/' src/main/resources/META-INF/plugin.xml
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Run tests
+        run: ./gradlew test
+
+      - name: Verify plugin
+        run: ./gradlew verifyPlugin
+
+      - name: Build plugin
+        run: ./gradlew buildPlugin
+
+      - name: Upload plugin artifact
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: bitwarden-jetbrains-plugin-${{ env._PLUGIN_VERSION }}.${{ env._BUILD_NUMBER }}-${{ env._RELEASE_CHANNEL }}
+          path: apps/jetbrains-plugin/build/distributions/*.zip
+          if-no-files-found: error
+
+      - name: Upload plugin for testing
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: bitwarden-jetbrains-plugin-latest
+          path: apps/jetbrains-plugin/build/distributions/*.zip
+          if-no-files-found: error
+
+  # Upload to plugin repository (only on main branch or release)
+  publish:
+    name: Publish Plugin
+    runs-on: ubuntu-22.04
+    needs: [setup, build]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/rc'
+    env:
+      _PLUGIN_VERSION: ${{ needs.setup.outputs.plugin_version }}
+      _BUILD_NUMBER: ${{ needs.setup.outputs.build_number }}
+      _RELEASE_CHANNEL: ${{ needs.setup.outputs.release_channel }}
+    defaults:
+      run:
+        working-directory: apps/jetbrains-plugin
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Download plugin artifact
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: bitwarden-jetbrains-plugin-${{ env._PLUGIN_VERSION }}.${{ env._BUILD_NUMBER }}-${{ env._RELEASE_CHANNEL }}
+          path: apps/jetbrains-plugin/build/distributions/
+
+      - name: Publish to JetBrains Marketplace
+        if: env._RELEASE_CHANNEL == 'stable'
+        env:
+          PUBLISH_TOKEN: ${{ secrets.JETBRAINS_MARKETPLACE_TOKEN }}
+        run: |
+          if [ -n "$PUBLISH_TOKEN" ]; then
+            ./gradlew publishPlugin
+            echo "Plugin published to JetBrains Marketplace"
+          else
+            echo "JETBRAINS_MARKETPLACE_TOKEN not set, skipping publish"
+          fi
+
+      - name: Publish to Alpha/Beta Channel
+        if: env._RELEASE_CHANNEL != 'stable'
+        env:
+          PUBLISH_TOKEN: ${{ secrets.JETBRAINS_MARKETPLACE_TOKEN }}
+        run: |
+          if [ -n "$PUBLISH_TOKEN" ]; then
+            # For alpha/beta, we would publish to a different channel
+            echo "Would publish to ${{ env._RELEASE_CHANNEL }} channel"
+            echo "This requires additional marketplace configuration"
+          else
+            echo "JETBRAINS_MARKETPLACE_TOKEN not set, skipping publish"
+          fi
+
+  check-failures:
+    name: Check for failures
+    if: always()
+    runs-on: ubuntu-22.04
+    needs:
+      - setup
+      - build
+      - publish
+    steps:
+      - name: Check if any job failed
+        if: |
+          github.event_name != 'pull_request_target'
+          && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/rc')
+          && contains(needs.*.result, 'failure')
+        run: exit 1
+
+      - name: Report success
+        if: |
+          !contains(needs.*.result, 'failure')
+        run: |
+          echo "✅ JetBrains Plugin build completed successfully"
+          echo "Plugin version: ${{ needs.setup.outputs.plugin_version }}.${{ needs.setup.outputs.build_number }}"
+          echo "Release channel: ${{ needs.setup.outputs.release_channel }}"
