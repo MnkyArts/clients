@@ -1,20 +1,35 @@
 package com.bitwarden.jetbrains.autofill
 
-import com.intellij.ide.browsers.WebBrowser
-import com.intellij.ide.browsers.WebBrowserUrlProvider
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.vfs.VirtualFile
 
-class BitwardenWebBrowserProvider : WebBrowserUrlProvider() {
+/**
+ * Service for providing browser integration and autofill capabilities.
+ * In a future version, this could integrate with browser extensions or
+ * provide web content injection for autofill functionality.
+ */
+class BitwardenWebBrowserProvider {
     
-    override fun canHandleElement(request: OpenInBrowserRequest): Boolean {
-        // This provider can handle any web content for autofill injection
-        return true
+    companion object {
+        fun getInstance(): BitwardenWebBrowserProvider {
+            return ApplicationManager.getApplication().getService(BitwardenWebBrowserProvider::class.java)
+        }
     }
     
-    override fun getUrl(request: OpenInBrowserRequest, browser: WebBrowser): String? {
-        // In a full implementation, this would inject Bitwarden autofill scripts
-        // For now, just return the default URL
-        return null // Let default handling proceed
+    /**
+     * Check if autofill can be provided for the given URL.
+     */
+    fun canProvideAutofill(url: String): Boolean {
+        // Basic URL validation - in a full implementation this would check
+        // against vault items and supported domains
+        return url.startsWith("http://") || url.startsWith("https://")
+    }
+    
+    /**
+     * Future method for injecting autofill scripts into web content.
+     */
+    fun injectAutofillScript(project: Project?, url: String): Boolean {
+        // Placeholder for future implementation
+        return false
     }
 }

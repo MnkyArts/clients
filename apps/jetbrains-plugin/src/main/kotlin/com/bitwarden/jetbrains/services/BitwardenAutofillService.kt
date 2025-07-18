@@ -80,11 +80,11 @@ class BitwardenAutofillService {
             
             override fun isSpeedSearchEnabled(): Boolean = true
             
-            override fun getSpeedSearchFilter(): com.intellij.util.Processor<String> {
-                return com.intellij.util.Processor { pattern ->
-                    values.any { item ->
-                        item.name.contains(pattern, ignoreCase = true) ||
-                        item.username?.contains(pattern, ignoreCase = true) == true
+            override fun getSpeedSearchFilter(): com.intellij.openapi.ui.popup.SpeedSearchFilter<AutofillItem>? {
+                return object : com.intellij.openapi.ui.popup.SpeedSearchFilter<AutofillItem> {
+                    override fun canBeHidden(value: AutofillItem): Boolean = false
+                    override fun getIndexedString(value: AutofillItem): String {
+                        return value.name + " " + (value.username ?: "")
                     }
                 }
             }

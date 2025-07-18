@@ -81,11 +81,11 @@ class QuickAccessAction : AnAction() {
             
             override fun isSpeedSearchEnabled(): Boolean = true
             
-            override fun getSpeedSearchFilter(): com.intellij.util.Processor<String> {
-                return com.intellij.util.Processor { pattern ->
-                    values.any { item ->
-                        item.name.contains(pattern, ignoreCase = true) ||
-                        item.subtitle.contains(pattern, ignoreCase = true)
+            override fun getSpeedSearchFilter(): com.intellij.openapi.ui.popup.SpeedSearchFilter<QuickAccessItem>? {
+                return object : com.intellij.openapi.ui.popup.SpeedSearchFilter<QuickAccessItem> {
+                    override fun canBeHidden(value: QuickAccessItem): Boolean = false
+                    override fun getIndexedString(value: QuickAccessItem): String {
+                        return value.name + " " + value.subtitle
                     }
                 }
             }
