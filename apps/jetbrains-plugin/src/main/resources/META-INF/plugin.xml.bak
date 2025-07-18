@@ -29,7 +29,6 @@
     <!-- Product and plugin compatibility requirements -->
     <depends>com.intellij.modules.platform</depends>
     <depends optional="true" config-file="java-features.xml">com.intellij.modules.java</depends>
-    <depends optional="true" config-file="javascript-features.xml">com.intellij.modules.ultimate</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <!-- Add your extensions here -->
@@ -37,13 +36,12 @@
         <applicationService serviceImplementation="com.bitwarden.jetbrains.services.BitwardenVaultService"/>
         <applicationService serviceImplementation="com.bitwarden.jetbrains.services.BitwardenSyncService"/>
         <applicationService serviceImplementation="com.bitwarden.jetbrains.services.BitwardenAutofillService"/>
+        <applicationService serviceImplementation="com.bitwarden.jetbrains.autofill.BitwardenWebBrowserProvider"/>
 
         <toolWindow id="Bitwarden" secondary="true" icon="AllIcons.Ide.HectorSyntax" anchor="right"
                     factoryClass="com.bitwarden.jetbrains.ui.BitwardenToolWindowFactory"/>
 
         <passwordSafe.configuration implementation="com.bitwarden.jetbrains.services.BitwardenPasswordSafeProvider"/>
-
-        <webBrowser.provider implementation="com.bitwarden.jetbrains.autofill.BitwardenWebBrowserProvider"/>
 
         <backgroundPostStartupActivity implementation="com.bitwarden.jetbrains.startup.BitwardenStartupActivity"/>
     </extensions>
@@ -67,9 +65,4 @@
             <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt B"/>
         </action>
     </actions>
-
-    <applicationListeners>
-        <listener class="com.bitwarden.jetbrains.listeners.BitwardenApplicationListener"
-                  topic="com.intellij.ide.ApplicationActivationListener"/>
-    </applicationListeners>
 </idea-plugin>

@@ -170,11 +170,11 @@ jobs:
         if: env._RELEASE_CHANNEL != 'stable'
         run: |
           # Update plugin.xml to include channel information
-          sed -i 's/<name>Bitwarden<\/name>/<name>Bitwarden (${{ env._RELEASE_CHANNEL }})<\/name>/' src/main/resources/META-INF/plugin.xml
+          sed -i "s/<name>Bitwarden</name>/<name>Bitwarden (${{ env._RELEASE_CHANNEL }})</name>/" src/main/resources/META-INF/plugin.xml
           sed -i 's/<id>com.bitwarden.jetbrains<\/id>/<id>com.bitwarden.jetbrains.${{ env._RELEASE_CHANNEL }}<\/id>/' src/main/resources/META-INF/plugin.xml
 
-      - name: Verify Gradle wrapper
-        run: gradle wrapper --gradle-version=8.4
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
 
       - name: Run tests
         run: ./gradlew test
