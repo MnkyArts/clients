@@ -5,12 +5,14 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.util.concurrency.AppExecutorUtil
+import kotlinx.coroutines.runBlocking
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.net.URLEncoder
 import java.security.MessageDigest
+import java.security.SecureRandom
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 import java.util.*
@@ -29,6 +31,13 @@ class BitwardenAuthService {
     private var accessToken: String? = null
     private var refreshToken: String? = null
     private var isAuthenticated = false
+    
+    data class PreloginResponse(
+        val kdf: Int = 0, // 0 = PBKDF2, 1 = Argon2id
+        val kdfIterations: Int = 100000, // Default PBKDF2 iterations
+        val kdfMemory: Int? = null, // For Argon2
+        val kdfParallelism: Int? = null // For Argon2
+    )
     
     data class LoginResult(
         val success: Boolean,
@@ -52,20 +61,67 @@ class BitwardenAuthService {
     
     fun getAccessToken(): String? = accessToken
     
-    private fun hashPassword(password: String, email: String): String {
-        try {
-            // Use PBKDF2 with SHA-256 for proper Bitwarden password hashing
-            val spec = PBEKeySpec(password.toCharArray(), email.lowercase().toByteArray(), 100000, 256)
-            val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
-            val hash = factory.generateSecret(spec).encoded
-            return Base64.getEncoder().encodeToString(hash)
+    private suspend fun getPreloginInfo(email: String, serverUrl: String): PreloginResponse {
+        val apiUrl = getApiUrl(serverUrl)
+        val request = Request.Builder()
+            .url("$apiUrl/accounts/prelogin")
+            .post("{\"email\":\"${email.trim().lowercase()}\"}".toRequestBody("application/json".toMediaTypeOrNull()))
+            .header("Content-Type", "application/json")
+            .header("User-Agent", "Bitwarden JetBrains Plugin")
+            .build()
+        
+        return try {
+            val response = httpClient.newCall(request).execute()
+            val responseBody = response.body?.string() ?: "{}"
+            
+            if (response.isSuccessful) {
+                val jsonNode = objectMapper.readTree(responseBody)
+                PreloginResponse(
+                    kdf = jsonNode.get("kdf")?.asInt() ?: 0,
+                    kdfIterations = jsonNode.get("kdfIterations")?.asInt() ?: 100000,
+                    kdfMemory = jsonNode.get("kdfMemory")?.asInt(),
+                    kdfParallelism = jsonNode.get("kdfParallelism")?.asInt()
+                )
+            } else {
+                logger.warn("Prelogin failed: ${response.code} ${response.message}, using defaults")
+                PreloginResponse() // Use defaults if prelogin fails
+            }
         } catch (e: Exception) {
-            logger.warn("Failed to use PBKDF2, falling back to SHA-256", e)
-            // Fallback to simple SHA-256 if PBKDF2 is not available
-            val digest = MessageDigest.getInstance("SHA-256")
-            val hashBytes = digest.digest("$password${email.lowercase()}".toByteArray())
-            return Base64.getEncoder().encodeToString(hashBytes)
+            logger.warn("Prelogin request failed, using defaults", e)
+            PreloginResponse() // Use defaults on any error
         }
+    }
+    
+    private fun deriveMasterKey(password: String, email: String, preloginInfo: PreloginResponse): ByteArray {
+        val emailBytes = email.trim().lowercase().toByteArray()
+        
+        return when (preloginInfo.kdf) {
+            0 -> { // PBKDF2
+                val spec = PBEKeySpec(password.toCharArray(), emailBytes, preloginInfo.kdfIterations, 256)
+                val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+                factory.generateSecret(spec).encoded
+            }
+            1 -> { // Argon2id - not commonly supported in JVM, fallback to PBKDF2
+                logger.warn("Argon2 not supported, falling back to PBKDF2")
+                val spec = PBEKeySpec(password.toCharArray(), emailBytes, 100000, 256)
+                val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+                factory.generateSecret(spec).encoded
+            }
+            else -> {
+                logger.warn("Unknown KDF type ${preloginInfo.kdf}, using PBKDF2")
+                val spec = PBEKeySpec(password.toCharArray(), emailBytes, 100000, 256)
+                val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+                factory.generateSecret(spec).encoded
+            }
+        }
+    }
+    
+    private fun hashMasterKeyForServer(masterKey: ByteArray, password: String): String {
+        // Hash the master key with password using PBKDF2 with 1 iteration for server
+        val spec = PBEKeySpec(password.toCharArray(), masterKey, 1, 256)
+        val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+        val hash = factory.generateSecret(spec).encoded
+        return Base64.getEncoder().encodeToString(hash)
     }
     
     private fun encodeEmailHeader(email: String): String {
@@ -90,7 +146,7 @@ class BitwardenAuthService {
         }.joinToString("&")
     }
     
-    private fun getIdentityUrl(serverUrl: String): String {
+    private fun getApiUrl(serverUrl: String): String {
         // Handle different server URL formats to match Bitwarden client behavior
         val baseUrl = when {
             serverUrl.endsWith("/") -> serverUrl.removeSuffix("/")
@@ -99,6 +155,25 @@ class BitwardenAuthService {
         
         return when {
             // For bitwarden.com, use api.bitwarden.com 
+            baseUrl.contains("vault.bitwarden.com") -> "https://api.bitwarden.com"
+            baseUrl.contains("bitwarden.com") && !baseUrl.contains("api.") -> 
+                baseUrl.replace("vault.bitwarden.com", "api.bitwarden.com")
+                    .replace("identity.bitwarden.com", "api.bitwarden.com")
+            // For custom servers, add /api if not already there
+            baseUrl.contains("/api") -> baseUrl
+            else -> "$baseUrl/api"
+        }
+    }
+    
+    private fun getIdentityUrl(serverUrl: String): String {
+        // Handle different server URL formats to match Bitwarden client behavior
+        val baseUrl = when {
+            serverUrl.endsWith("/") -> serverUrl.removeSuffix("/")
+            else -> serverUrl
+        }
+        
+        return when {
+            // For bitwarden.com, use identity.bitwarden.com 
             baseUrl.contains("vault.bitwarden.com") -> "https://identity.bitwarden.com"
             baseUrl.contains("bitwarden.com") && !baseUrl.contains("identity.") -> 
                 baseUrl.replace("vault.bitwarden.com", "identity.bitwarden.com")
@@ -139,14 +214,27 @@ class BitwardenAuthService {
     fun loginAsync(email: String, masterPassword: String, serverUrl: String = "https://vault.bitwarden.com"): CompletableFuture<LoginResult> {
         return CompletableFuture.supplyAsync({
             try {
-                // Hash the password properly using PBKDF2
-                val masterPasswordHash = hashPassword(masterPassword, email)
+                logger.info("Starting login process for email: $email to server: $serverUrl")
+                
+                // Step 1: Get prelogin information (KDF config)
+                val preloginInfo = runBlocking { getPreloginInfo(email, serverUrl) }
+                logger.info("Got prelogin info: KDF=${preloginInfo.kdf}, iterations=${preloginInfo.kdfIterations}")
+                
+                // Step 2: Derive master key using the KDF configuration
+                val masterKey = deriveMasterKey(masterPassword, email, preloginInfo)
+                logger.info("Master key derived successfully")
+                
+                // Step 3: Hash the master key for server authentication (1 iteration)
+                val masterPasswordHash = hashMasterKeyForServer(masterKey, masterPassword)
+                logger.info("Master password hash computed for server")
+                
+                // Step 4: Create login request
                 val loginRequest = LoginRequest(email, masterPasswordHash)
                 
-                // Build form data as required by Bitwarden API
+                // Step 5: Build form data as required by Bitwarden API
                 val formData = buildFormData(loginRequest)
                 
-                // Get the correct identity URL for the server
+                // Step 6: Get the correct identity URL for the server
                 val identityUrl = getIdentityUrl(serverUrl)
                 
                 val requestBody = formData.toRequestBody("application/x-www-form-urlencoded".toMediaTypeOrNull())
@@ -163,24 +251,55 @@ class BitwardenAuthService {
                 val response = httpClient.newCall(request).execute()
                 val responseBody = response.body?.string() ?: ""
                 
+                logger.info("Login response: ${response.code} ${response.message}")
+                if (responseBody.isNotEmpty() && responseBody.length < 500) {
+                    logger.info("Response body: $responseBody")
+                } else if (responseBody.isNotEmpty()) {
+                    logger.info("Response body (truncated): ${responseBody.take(500)}...")
+                }
+                
                 if (response.isSuccessful) {
                     parseLoginResponse(responseBody)
                 } else {
                     val errorMessage = "Login failed: ${response.code} ${response.message}"
-                    logger.warn("$errorMessage - Response: $responseBody")
+                    logger.warn(errorMessage)
                     
-                    // Try to parse error from response
+                    // Try to parse error from response for better error messages
                     if (responseBody.isNotEmpty()) {
                         try {
                             val errorJson = objectMapper.readTree(responseBody)
                             val error = errorJson.get("error")?.asText()
                             val errorDescription = errorJson.get("error_description")?.asText()
-                            if (error != null) {
-                                val detailedError = if (errorDescription != null) "$error: $errorDescription" else error
-                                return@supplyAsync LoginResult(false, errorMessage = detailedError)
+                            val validationErrors = errorJson.get("ValidationErrors")
+                            
+                            when {
+                                validationErrors != null && validationErrors.isObject -> {
+                                    // Handle validation errors
+                                    val firstError = validationErrors.fields().asSequence().firstOrNull()
+                                    if (firstError != null) {
+                                        val field = firstError.key
+                                        val message = firstError.value.firstOrNull()?.asText() ?: "Invalid value"
+                                        return@supplyAsync LoginResult(false, errorMessage = "$field: $message")
+                                    }
+                                }
+                                error != null -> {
+                                    val detailedError = if (errorDescription != null) "$error: $errorDescription" else error
+                                    return@supplyAsync LoginResult(false, errorMessage = detailedError)
+                                }
+                                else -> {
+                                    // Try to extract any error message from response
+                                    val message = errorJson.get("message")?.asText()
+                                    if (message != null) {
+                                        return@supplyAsync LoginResult(false, errorMessage = message)
+                                    }
+                                }
                             }
                         } catch (e: Exception) {
-                            // Fall through to generic error
+                            logger.warn("Failed to parse error response as JSON", e)
+                            // If it's not JSON, show the response body if it's reasonable length
+                            if (responseBody.length < 200) {
+                                return@supplyAsync LoginResult(false, errorMessage = "Server error: $responseBody")
+                            }
                         }
                     }
                     
