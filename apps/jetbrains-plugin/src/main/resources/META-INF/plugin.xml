@@ -28,8 +28,7 @@
 
     <!-- Product and plugin compatibility requirements -->
     <depends>com.intellij.modules.platform</depends>
-    <depends optional="true" config-file="java-features.xml">com.intellij.modules.java</depends>
-    <depends optional="true" config-file="javascript-features.xml">com.intellij.modules.ultimate</depends>
+    <depends optional="true">com.intellij.modules.java</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <!-- Add your extensions here -->
