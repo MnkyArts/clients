@@ -1,7 +1,7 @@
 plugins {
     id("java")
-    id("org.jetbrains.intellij") version "1.16.1"
-    id("org.jetbrains.kotlin.jvm") version "1.9.10"
+    id("org.jetbrains.intellij") version "1.17.4"
+    id("org.jetbrains.kotlin.jvm") version "1.9.25"
 }
 
 group = "com.bitwarden"
@@ -28,7 +28,6 @@ intellij {
     plugins.set(listOf(
         "com.intellij.java",
         "org.jetbrains.kotlin",
-        "JavaScript",
         "org.jetbrains.plugins.terminal"
     ))
 }
