@@ -1,0 +1,75 @@
+<idea-plugin>
+    <id>com.bitwarden.jetbrains</id>
+    <name>Bitwarden</name>
+    <vendor email="hello@bitwarden.com" url="https://bitwarden.com">Bitwarden Inc.</vendor>
+
+    <description><![CDATA[
+    The official Bitwarden JetBrains plugin provides secure password management and autofill capabilities directly in your IDE.
+
+    Features:
+    - Secure password autofill in forms and login dialogs
+    - Automatic vault synchronization
+    - Quick access to your Bitwarden vault
+    - Integration with JetBrains authentication flows
+    - Support for all major JetBrains IDEs (IntelliJ IDEA, PyCharm, WebStorm, etc.)
+
+    Connect your Bitwarden account to automatically fill passwords, secure notes, and other vault items without leaving your development environment.
+    ]]></description>
+
+    <change-notes><![CDATA[
+    <h3>Version 2025.7.1</h3>
+    <ul>
+        <li>Initial release of Bitwarden JetBrains Plugin</li>
+        <li>Secure autofill functionality for login forms</li>
+        <li>Automatic vault synchronization</li>
+        <li>Integration with JetBrains IDE authentication</li>
+    </ul>
+    ]]></change-notes>
+
+    <!-- Product and plugin compatibility requirements -->
+    <depends>com.intellij.modules.platform</depends>
+    <depends optional="true" config-file="java-features.xml">com.intellij.modules.java</depends>
+    <depends optional="true" config-file="javascript-features.xml">com.intellij.modules.ultimate</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Add your extensions here -->
+        <applicationService serviceImplementation="com.bitwarden.jetbrains.services.BitwardenAuthService"/>
+        <applicationService serviceImplementation="com.bitwarden.jetbrains.services.BitwardenVaultService"/>
+        <applicationService serviceImplementation="com.bitwarden.jetbrains.services.BitwardenSyncService"/>
+        <applicationService serviceImplementation="com.bitwarden.jetbrains.services.BitwardenAutofillService"/>
+
+        <toolWindow id="Bitwarden" secondary="true" icon="AllIcons.Ide.HectorSyntax" anchor="right"
+                    factoryClass="com.bitwarden.jetbrains.ui.BitwardenToolWindowFactory"/>
+
+        <passwordSafe.configuration implementation="com.bitwarden.jetbrains.services.BitwardenPasswordSafeProvider"/>
+
+        <webBrowser.provider implementation="com.bitwarden.jetbrains.autofill.BitwardenWebBrowserProvider"/>
+
+        <backgroundPostStartupActivity implementation="com.bitwarden.jetbrains.startup.BitwardenStartupActivity"/>
+    </extensions>
+
+    <actions>
+        <!-- Add your actions here -->
+        <group id="BitwardenActionGroup" text="Bitwarden" description="Bitwarden password manager actions">
+            <add-to-group group-id="MainMenu" anchor="last"/>
+            <action id="BitwardenLogin" class="com.bitwarden.jetbrains.actions.LoginAction" text="Login to Bitwarden"
+                    description="Log in to your Bitwarden account"/>
+            <action id="BitwardenSync" class="com.bitwarden.jetbrains.actions.SyncAction" text="Sync Vault"
+                    description="Synchronize your Bitwarden vault"/>
+            <action id="BitwardenLogout" class="com.bitwarden.jetbrains.actions.LogoutAction" text="Logout"
+                    description="Log out of your Bitwarden account"/>
+            <action id="BitwardenSettings" class="com.bitwarden.jetbrains.actions.SettingsAction" text="Settings"
+                    description="Open Bitwarden settings"/>
+        </group>
+
+        <action id="BitwardenQuickAccess" class="com.bitwarden.jetbrains.actions.QuickAccessAction"
+                text="Bitwarden Quick Access" description="Quick access to Bitwarden vault">
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt B"/>
+        </action>
+    </actions>
+
+    <applicationListeners>
+        <listener class="com.bitwarden.jetbrains.listeners.BitwardenApplicationListener"
+                  topic="com.intellij.ide.ApplicationActivationListener"/>
+    </applicationListeners>
+</idea-plugin>

@@ -1,0 +1,31 @@
+{
+  "name": "@bitwarden/jetbrains-plugin",
+  "description": "Bitwarden JetBrains Plugin - Secure password management for JetBrains IDEs",
+  "version": "2025.7.1",
+  "keywords": [
+    "bitwarden",
+    "password",
+    "vault",
+    "password manager",
+    "jetbrains",
+    "intellij",
+    "plugin"
+  ],
+  "author": "Bitwarden Inc. <hello@bitwarden.com> (https://bitwarden.com)",
+  "homepage": "https://bitwarden.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bitwarden/clients.git",
+    "directory": "apps/jetbrains-plugin"
+  },
+  "license": "GPL-3.0",
+  "scripts": {
+    "build": "./gradlew buildPlugin",
+    "test": "./gradlew test",
+    "verify": "./gradlew verifyPlugin",
+    "run": "./gradlew runIde",
+    "clean": "./gradlew clean"
+  },
+  "devDependencies": {},
+  "dependencies": {}
+}
